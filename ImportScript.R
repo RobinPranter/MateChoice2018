@@ -1,11 +1,31 @@
 #Script for reeding in the presentation data files and converting them to apropriate format.
+#It does the folowing things:
+  #Defining functions#
+    #ReadData()
+    #CleanData()
+    #CompData()
+    #Run()
+  #Runs the shit and retuns an list Archive containing 3 data frames
+    #Raw - The Raw datafile as given from the app. A few asthetic modifications are included.
+    #Clean - A cleaned up vesion of the above.
+      #Trials with no values are deleted
+      #Rounds with < 5 Trials are deleted
+      #The numbering of the trials are corrected
+    #Comp - Same as Clean but with two new columns, TrialValue and RaoundValue
+      #Here I call three presentations a Trial and five Trials a Round
+      #Each (most) male(s) went through four rounds (wt f, wt m, tr f and tr m)
+      #TrialValue - Trial values according to scale (222 -> 1, else -> mean)
+      #RoundValue - The Round mean of TrialValues
+
+#Set working directory (correct this if necessary) 
 setwd("D:/Documents/MatechoiceColor2018/PresentationData")
 
+#Read in libraries
 library(reshape2)
 library(plyr)
 
-#Defining function for reading in the file
-ReadFile <- function(filename){ 
+#Defining function for reading in the file + esthetic modifications
+ReadData <- function(filename){ 
   
   #read in the file and separate it by ";"
   file <- read.csv(filename, sep=";", header = FALSE,
@@ -39,31 +59,69 @@ ReadFile <- function(filename){
      #Here I call three presentations a Trial and five Trials a Round
      #Each (most) male(s) went through four rounds (wt f, wt m, tr f and tr m)
 CleanData <- function(datain){
-  #Get rid of Rounds with < 5 Trials
-  DelRows<- c()                       #Defining the vector of rows to be deleted
-  Round <- c(datain[1, "Trial"])      #Going through the first row outside of for-loop
-  for (rownr in 2:nrow(datain)){      #For-loop going through data row-by-row
-    if (datain[rownr, "Pres_to"] != datain[rownr-1, "Pres_to"] |     #Checking if still in same Round
-        datain[rownr, "Treatment"] != datain[rownr-1, "Treatment"]){ #
-      if (length(Round) < 5){                                        #Checking number of presentations
-        DelRows <- c(DelRows, (rownr-length(Round)):(rownr-1))       #Deleting the round in case of
-      }                                                              #to few trials
-      Round <- c()                            #Resetting Round
+  DelRows <- c()
+  NTrials <- 0
+  for (rownr in 1:nrow(datain)){
+    #Get rid of trials with no presentation values
+    if (is.na(datain[rownr, "Pres1"]) & is.na(datain[rownr, "Pres2"]) & is.na(datain[rownr, "Pres3"])){
+      DelRows <- c(DelRows,rownr)
     }
-    Round <- c(Round, datain[rownr, "Trial"]) #Appending trial to round
+    #Get rid of Rounds with < 5 Trials
+    NTrials <- NTrials + 1
+    if (rownr >1){
+      if ((datain[rownr, "Pres_to"] != datain[rownr-1, "Pres_to"] |     #Checking if still in same Round
+           datain[rownr, "Treatment"] != datain[rownr-1, "Treatment"]) & NTrials <5){
+        DelRows <- c(DelRows, (rownr-NTrials):rownr)
+        NTrials <- 0
+      }
+      #Correct the numbering of the trials
+      if (datain[rownr, "Pres_to"] == datain[rownr-1, "Pres_to"] &     #Checking if still in same Round
+          datain[rownr, "Treatment"] == datain[rownr-1, "Treatment"]){
+        datain[rownr, "Trial"] <- datain[rownr-1, "Trial"] + 1 
+      }
+    }
   }
-  #print(DelRows)
-  dataout <- datain[-c(DelRows), ]            #Deleting the incomplete rounds
+  dataout <- datain[-c(DelRows), ]
   return(dataout)
 }
 
-#Defining function for computing means and medians etc
-CompData <- function(datain){ 
-  #return(dataout)
+
+#Defining function for computing trial and Round values
+CompData <- function(datain){
+  #Initiate new columns
+  datain["TrialValue"] <- NA
+  datain["RoundValue"] <- NA
+  dataout <- datain[c(1:7, 11:12, 8:10)]
+  Startrow <- 1
+  for (rownr in 1:nrow(dataout)){
+    #Compute trial and round values
+    #2,2,2,->1
+    if (identical(dataout[rownr, "Pres1"], as.integer(2)) & identical(dataout[rownr, "Pres2"], as.integer(2))
+        & identical(dataout[rownr, "Pres3"], as.integer(2))){
+      dataout[rownr, "TrialValue"] <- 1
+    }
+    #else mean
+    else{
+      Presentations <- as.numeric(dataout[rownr, 5:7])
+      dataout[rownr, "TrialValue"] <- mean(Presentations, na.rm=TRUE)
+    }
+    #Compute Round values
+    if (rownr > 1){
+      if (dataout[rownr, "Pres_to"] != dataout[rownr-1, "Pres_to"] |     #Checking if still in same Round
+          dataout[rownr, "Treatment"] != dataout[rownr-1, "Treatment"]){
+        dataout[rownr-1, "RoundValue"] <- mean(dataout[Startrow:(rownr-1), "TrialValue"])
+        Startrow <- rownr
+      }
+    }
+  }
+  return(dataout)
 }
 
+
+#Defines function for running the above in successive order with the output from each func as the
+#input for the successor.
 Run <- function(filename){
-  Raw <- ReadFile(filename)
+  Raw <- ReadData(filename)
   Clean <- CleanData(Raw)
   Comp <- CompData(Clean)
   Outlist <- list(Raw, Clean, Comp)
@@ -71,10 +129,5 @@ Run <- function(filename){
   return(Outlist)
 }
 
-
+#Running the shit
 Archive <- Run("RobinCleanData.txt")
-PresData <- Archive$Comp
-
-work <- Archive$Raw
-
-
